@@ -19,7 +19,9 @@ import os
 import re
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from contextlib import redirect_stdout
 from functools import partial
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -28,21 +30,47 @@ import numpy as np
 import torch
 from gymnasium import spaces
 from libero.libero import benchmark, get_libero_path
-from libero.libero.envs import OffScreenRenderEnv
+from libero.libero.envs import OffScreenRenderEnv, bddl_utils
+from libero.libero.envs.env_wrapper import ControlEnv
 
 from lerobot.lerobot_types import RobotObservation
 
 from .utils import _LazyAsyncVectorEnv, parse_camera_names
 
 
-def _get_suite(name: str) -> benchmark.Benchmark:
+def _get_suite(name: str, is_libero_plus: bool = False) -> benchmark.Benchmark:
     """Instantiate a LIBERO suite by name with clear validation."""
     bench = benchmark.get_benchmark_dict()
     if name not in bench:
         raise ValueError(f"Unknown LIBERO suite '{name}'. Available: {', '.join(sorted(bench.keys()))}")
-    suite = bench[name]()
+    with redirect_stdout(StringIO()):
+        suite = bench[name]()
     if not getattr(suite, "tasks", None):
         raise ValueError(f"Suite '{name}' has no tasks.")
+    if not is_libero_plus:
+        init_states_dir = Path(get_libero_path("init_states")) / name
+        standard_task_names = sorted(path.stem for path in init_states_dir.glob("*.pruned_init"))
+        if standard_task_names and len(suite.tasks) != len(standard_task_names):
+            task_type = type(suite.tasks[0])
+            bddl_dir = Path(get_libero_path("bddl_files")) / name
+            tasks = []
+            for task_name in standard_task_names:
+                bddl_path = bddl_dir / f"{task_name}.bddl"
+                if not bddl_path.is_file():
+                    raise FileNotFoundError(f"Missing LIBERO BDDL file for standard task: {bddl_path}")
+                problem_info = bddl_utils.get_problem_info(str(bddl_path))
+                tasks.append(
+                    task_type(
+                        name=task_name,
+                        language=problem_info["language_instruction"],
+                        problem="Libero",
+                        problem_folder=name,
+                        bddl_file=bddl_path.name,
+                        init_states_file=f"{task_name}.pruned_init",
+                    )
+                )
+            suite.tasks = tasks
+            suite.n_tasks = len(tasks)
     return suite
 
 
@@ -127,8 +155,11 @@ class LiberoEnv(gym.Env):
         num_steps_wait: int = 10,
         control_freq: int = 20,
         control_mode: str = "relative",
+        robot: str = "Panda",
         is_libero_plus: bool = False,
         hard_reset: bool = True,
+        onscreen_renderer: bool = False,
+        render_camera: str = "agentview",
     ):
         super().__init__()
         if control_freq <= 0:
@@ -137,6 +168,7 @@ class LiberoEnv(gym.Env):
             raise ValueError("hard_reset=False requires init_states=True")
         self.task_id = task_id
         self.is_libero_plus = is_libero_plus
+        self.robot = robot
         self.obs_type = obs_type
         self.render_mode = render_mode
         self.observation_width = observation_width
@@ -162,6 +194,8 @@ class LiberoEnv(gym.Env):
         self.num_steps_wait = num_steps_wait
         self.control_freq = control_freq
         self.hard_reset = hard_reset
+        self.onscreen_renderer = onscreen_renderer
+        self.render_camera = render_camera
         self.episode_index = episode_index
         self.episode_length = episode_length
         # Load once and keep
@@ -181,7 +215,7 @@ class LiberoEnv(gym.Env):
         self._task_bddl_file = os.path.join(
             get_libero_path("bddl_files"), task.problem_folder, task.bddl_file
         )
-        self._env: OffScreenRenderEnv | None = (
+        self._env: ControlEnv | None = (
             None  # deferred — created on first reset() inside the worker subprocess
         )
 
@@ -264,11 +298,16 @@ class LiberoEnv(gym.Env):
         """
         if self._env is not None:
             return
-        env = OffScreenRenderEnv(
+        env_cls = ControlEnv if self.onscreen_renderer else OffScreenRenderEnv
+        env = env_cls(
             bddl_file_name=self._task_bddl_file,
             camera_heights=self.observation_height,
             camera_widths=self.observation_width,
             control_freq=self.control_freq,
+            robots=[self.robot],
+            has_renderer=self.onscreen_renderer,
+            has_offscreen_renderer=True,
+            render_camera=self.render_camera,
             # Soft resets skip LIBERO's model and renderer rebuild. They are opt-in
             # because settle steps can make their observations differ from hard resets.
             hard_reset=self.hard_reset,
@@ -278,6 +317,8 @@ class LiberoEnv(gym.Env):
 
     def render(self):
         self._ensure_env()
+        if self.onscreen_renderer:
+            self._env.env.render()
         raw_obs = self._env.env._get_observations()
         pixels = self._format_raw_obs(raw_obs)["pixels"]
         image = next(iter(pixels.values()))
@@ -488,7 +529,7 @@ def create_libero_envs(
 
     out: dict[str, dict[int, Any]] = defaultdict(dict)
     for suite_name in suite_names:
-        suite = _get_suite(suite_name)
+        suite = _get_suite(suite_name, is_libero_plus=is_libero_plus)
         total = len(suite.tasks)
         selected = _select_task_ids(total, task_ids_filter)
         if not selected:

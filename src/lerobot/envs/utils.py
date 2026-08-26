@@ -365,6 +365,11 @@ def _(env: gym.Env) -> None:
     _close_single_env(env)
 
 
+@close_envs.register
+def _(env: gym.vector.VectorEnv) -> None:
+    _close_single_env(env)
+
+
 # helper to safely load a python file as a module
 def _load_module_from_path(path: str, module_name: str | None = None):
     module_name = module_name or f"hub_env_{os.path.basename(path).replace('.', '_')}"

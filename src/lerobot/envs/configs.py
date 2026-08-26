@@ -321,6 +321,7 @@ class HILSerlRobotEnvConfig(EnvConfig):
 @dataclass
 class LiberoEnv(EnvConfig):
     task: str = "libero_10"  # can also choose libero_spatial, libero_object, etc.
+    robot: str = "Panda"
     task_ids: list[int] | None = None
     fps: int = 20  # Must match robosuite's default control_freq (20 Hz)
     episode_length: int | None = None
@@ -332,6 +333,8 @@ class LiberoEnv(EnvConfig):
     camera_name_mapping: dict[str, str] | None = None
     observation_height: int = 360
     observation_width: int = 360
+    onscreen_renderer: bool = False
+    render_camera: str = "agentview"
     is_libero_plus: bool = False
     features: dict[str, PolicyFeature] = field(
         default_factory=lambda: {
@@ -420,6 +423,9 @@ class LiberoEnv(EnvConfig):
             "observation_width": self.observation_width,
             "control_freq": self.fps,
             "hard_reset": self.hard_reset,
+            "robot": self.robot,
+            "onscreen_renderer": self.onscreen_renderer,
+            "render_camera": self.render_camera,
         }
         if self.task_ids is not None:
             kwargs["task_ids"] = self.task_ids
@@ -747,6 +753,7 @@ class LiberoPlusEnv(LiberoEnv):
     """
 
     task: str = "libero_spatial"
+    robot: str = "SemiTaksT1"
     is_libero_plus: bool = True
 
 

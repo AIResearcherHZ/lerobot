@@ -109,6 +109,7 @@ def compute_robometer_progress(
     num_subsampled_frames: int = DEFAULT_NUM_SUBSAMPLED_FRAMES,
     episodes: list[int] | None = None,
     image_key: str | None = None,
+    dataset_root: str | None = None,
 ) -> Path:
     """Run Robometer over a dataset and write per-frame progress + success."""
     logging.info(f"Loading Robometer: {reward_model_path}")
@@ -131,7 +132,7 @@ def compute_robometer_progress(
     image_key = config.image_key
 
     logging.info(f"Loading dataset: {dataset_repo_id}")
-    dataset = LeRobotDataset(dataset_repo_id, download_videos=True)
+    dataset = LeRobotDataset(dataset_repo_id, root=dataset_root, download_videos=True)
     logging.info(f"Dataset: {dataset.num_episodes} episodes, {dataset.num_frames} frames")
 
     episode_indices = list(range(dataset.num_episodes)) if episodes is None else episodes
@@ -235,6 +236,9 @@ Examples:
         "--dataset-repo-id", type=str, required=True, help="HuggingFace dataset repo id or local path."
     )
     parser.add_argument(
+        "--dataset-root", type=str, default=None, help="Local directory of the dataset (bypasses HF_LEROBOT_HOME lookup)."
+    )
+    parser.add_argument(
         "--reward-model-path", type=str, default=None, help="Robometer checkpoint repo id or local path."
     )
     parser.add_argument("--output-path", type=str, default=None, help="Output parquet path.")
@@ -264,7 +268,7 @@ Examples:
 
     reward_model_path = args.reward_model_path
     if reward_model_path is None:
-        temp_dataset = LeRobotDataset(args.dataset_repo_id, download_videos=False)
+        temp_dataset = LeRobotDataset(args.dataset_repo_id, root=args.dataset_root, download_videos=False)
         parquet_path = Path(temp_dataset.root) / DEFAULT_OUTPUT_FILENAME
         reward_model_path = get_reward_model_path_from_parquet(parquet_path)
         if reward_model_path:
@@ -283,6 +287,7 @@ Examples:
         num_subsampled_frames=args.num_subsampled_frames,
         episodes=args.episodes,
         image_key=args.image_key,
+        dataset_root=args.dataset_root,
     )
 
     print(f"\nRobometer progress saved to: {output_path}")

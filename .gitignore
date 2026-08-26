@@ -176,3 +176,10 @@ outputs/
 *.urdf
 *.xml
 *.part
+
+# Context-mode session stats (local only, not for upload)
+.github/context-mode/
+.envrc
+models/
+
+!taks_data/**

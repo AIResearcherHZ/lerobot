@@ -147,6 +147,7 @@ def compute_topreward_progress(
     num_samples: int | None = None,
     fps: float | None = None,
     episodes: list[int] | None = None,
+    dataset_root: str | None = None,
 ) -> Path:
     """Run TOPReward over a dataset and write per-frame progress."""
     if reward_model_path is not None:
@@ -186,7 +187,7 @@ def compute_topreward_progress(
     image_key = config.image_key
 
     logging.info(f"Loading dataset: {dataset_repo_id}")
-    dataset = LeRobotDataset(dataset_repo_id, download_videos=True)
+    dataset = LeRobotDataset(dataset_repo_id, root=dataset_root, download_videos=True)
     logging.info(f"Dataset: {dataset.num_episodes} episodes, {dataset.num_frames} frames")
 
     episode_indices = list(range(dataset.num_episodes)) if episodes is None else episodes
@@ -280,6 +281,9 @@ Examples:
         "--dataset-repo-id", type=str, required=True, help="HuggingFace dataset repo id or local path."
     )
     parser.add_argument(
+        "--dataset-root", type=str, default=None, help="Local directory of the dataset (bypasses HF_LEROBOT_HOME lookup)."
+    )
+    parser.add_argument(
         "--reward-model-path", type=str, default=None, help="Optional TOPReward LeRobot config."
     )
     parser.add_argument("--vlm-name", type=str, default=None, help="Override the VLM backbone (HF Hub id).")
@@ -316,6 +320,7 @@ Examples:
         num_samples=args.num_samples,
         fps=args.fps,
         episodes=args.episodes,
+        dataset_root=args.dataset_root,
     )
 
     print(f"\nTOPReward progress saved to: {output_path}")

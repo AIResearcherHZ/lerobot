@@ -29,6 +29,7 @@ from lerobot.envs.factory import make_env, make_env_config
 from lerobot.envs.utils import (
     _normalize_hub_result,
     _parse_hub_url,
+    close_envs,
     preprocess_observation,
 )
 from tests.utils import require_env
@@ -190,6 +191,12 @@ def test_normalize_hub_result():
     # test with invalid type
     with pytest.raises(ValueError, match="Hub `make_env` must return"):
         _normalize_hub_result("invalid_type")
+
+
+def test_close_vector_env():
+    env = gym.vector.SyncVectorEnv([lambda: gym.make("CartPole-v1")])
+
+    close_envs(env)
 
 
 def test_make_env_from_hub_requires_trust_remote_code():

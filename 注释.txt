@@ -1,0 +1,484 @@
+# LIBERO-plus · SemiTaksT1 · EVO1 / SmolVLA
+
+## 10 种 task-text prompt（libero_object，task_id 按字母序固定）
+
+> 部署脚本 `--task-text` 即 VLA 语言指令；环境内置 `language_instruction` 用 "pick the X"，VLA prompt 统一用 "pick up the X and place it in the basket"。
+
+| task_id | 物体 | `--task-text` prompt |
+|---|---|---|
+| 0 | alphabet soup | `pick up the alphabet soup and place it in the basket` |
+| 1 | bbq sauce | `pick up the bbq sauce and place it in the basket` |
+| 2 | butter | `pick up the butter and place it in the basket` |
+| 3 | chocolate pudding | `pick up the chocolate pudding and place it in the basket` |
+| 4 | cream cheese | `pick up the cream cheese and place it in the basket` |
+| 5 | ketchup | `pick up the ketchup and place it in the basket` |
+| 6 | milk | `pick up the milk and place it in the basket` |
+| 7 | orange juice | `pick up the orange juice and place it in the basket` |
+| 8 | salad dressing | `pick up the salad dressing and place it in the basket` |
+| 9 | tomato sauce | `pick up the tomato sauce and place it in the basket` |
+
+部署示例（task_id 与 prompt 必须对应，脚本会校验物体名）：
+
+```bash
+python -m lerobot.scripts.lerobot_deploy_libero \
+  --checkpoint ./models/evo1_libero --vla-name evo1 \
+  --vlm-model-name ./models/InternVL3-1B-hf --device cuda \
+  --n-action-steps 14 --observation-width 448 --observation-height 448 \
+  --postprocess-action-dim 7 --gripper-threshold 0.0 \
+  --gripper-below-threshold-value -1.0 --gripper-above-threshold-value 1.0 \
+  --suite libero_object --task-id 0 --robot Panda \
+  --task-text "pick up the alphabet soup and place it in the basket"
+```
+
+---
+
+# LIBERO-plus · SemiTaksT1 · EVO1 / SmolVLA
+
+> **任务** `pick_up_the_alphabet_soup_and_place_it_in_the_basket`
+> **机器人** SemiTaksT1 右臂 7 joints ｜ **输入** 双相机 + 8D state ｜ **输出** 7D action ｜ **数据** LeRobot v3
+
+## 0. 环境变量（所有命令前置）
+
+```bash
+export PYTHONPATH=./LIBERO-plus:./LIBERO-plus/libero
+export LIBERO_CONFIG_PATH=../.libero
+export MUJOCO_GL=egl          # 训练/评估用 egl
+export PYOPENGL_PLATFORM=egl
+# 人工采集/实时部署改用:  export MUJOCO_GL=glfw
+```
+
+---
+
+## 1. 安装
+
+### 1.1 EVO1
+
+```bash
+conda activate hhtools
+pip install -e . --extra training --extra evo1 --extra libero
+pip install --no-deps -e ./LIBERO-plus && pip uninstall -y hf-libero
+```
+
+### 1.2 SmolVLA
+
+```bash
+conda activate hhtools
+pip install -e . --extra training --extra smolvla --extra libero
+pip install --no-deps -e ./LIBERO-plus && pip uninstall -y hf-libero
+```
+
+---
+
+## 2. 数据采集
+
+### 2.1 键盘采集 50 episodes
+
+```bash
+python ./LIBERO-plus/scripts/collect_demonstration.py \
+  --robots SemiTaksT1 --device keyboard --num-demonstration 50 --camera agentview \
+  --bddl-file ./LIBERO-plus/libero/libero/bddl_files/libero_object/pick_up_the_alphabet_soup_and_place_it_in_the_basket.bddl
+```
+
+### 2.2 VR 采集 50 episodes
+
+```bash
+python ./LIBERO-plus/scripts/collect_demonstration.py \
+  --robots SemiTaksT1 --device vr --num-demonstration 50 --camera agentview \
+  --bddl-file ./LIBERO-plus/libero/libero/bddl_files/libero_object/pick_up_the_alphabet_soup_and_place_it_in_the_basket.bddl
+```
+
+`--camera=agentview` 只控制人工操作窗口；训练双相机（`agentview` + `robot0_eye_in_hand`）由转换脚本重新渲染。
+
+---
+
+## 3. HDF5 → LeRobot v3
+
+### 3.1 EVO1 数据（448×448）
+
+```bash
+python ./examples/convert_libero_hdf5_to_lerobot.py \
+  --input "./demonstration_data/libero_floor_manipulation_ln_pick_the_alphabet_soup_and_place_it_in_the_basket_*/demo.hdf5" \
+  --output ./demonstration_data/lerobot_v3_alphabet_soup_evo1 \
+  --with-images --image-size 448
+```
+
+### 3.2 SmolVLA 数据（512×512）
+
+```bash
+python ./examples/convert_libero_hdf5_to_lerobot.py \
+  --input "./demonstration_data/libero_floor_manipulation_ln_pick_the_alphabet_soup_and_place_it_in_the_basket_*/demo.hdf5" \
+  --output ./demonstration_data/lerobot_v3_alphabet_soup_smolvla \
+  --with-images --image-size 512
+```
+
+输出字段（两者相同，仅分辨率不同）：`observation.images.image=agentview` ｜ `observation.images.image2=wrist` ｜ `state=8D` ｜ `action=7D`。转换脚本相机顺序 `["robot0_eye_in_hand", "agentview"]`。
+
+---
+
+## 4. 现成 LIBERO-plus 数据（不自行采集时）
+
+```bash
+hf download lerobot/libero_plus --repo-type dataset --local-dir ./data/libero_plus
+```
+
+`total_frames=2,238,036`。验证：`data/*.parquet` 总行数 == `meta/info.json` 的 `total_frames`。
+> 原始数据是 Panda action，不能直接作为 SemiTaksT1 真机动作回放。
+
+可视化（需 `pip install -e . --extra dataset_viz`）：
+
+```bash
+lerobot-dataset-viz --repo-id lerobot/libero_plus --episode-index 3 --root ./data/libero_plus
+```
+
+---
+
+## 5. 训练 Episodes（EVO1 / SmolVLA 共用）
+
+```bash
+episode_ids='[3,133,150,178,220,283,295,314,348,376,380,386,404,503,537,560,566,571,612,642,702,746,756,799,849,864,896,926,999,1052,1078,1086,1089,1091,1139,1152,1202,1203,1219,1241,2603,2649,2652,2718,2771,2909,3035,3040,3055,3091,3116,3211,3238,3265,3333,3390,3407,3412,3413,3424,3433,3469,3494,3592,3721,3740,3745,3746,3752,3815,3833,3836,3844,3932,3948,3971,3988,4011,4072,4113,4129,4236,4248,4348,4367,4404,4467,4483,4486,4512,4559,4596,4646,4654,4658,4688,4756,4771,4810,4839,4882,4900,4906,4921,4926,4934,4941,4954,5003,5066,5100,5117,5149,5205,5206,5237,5278,5424,5449,5469,5496,5503,5523,5527,5533,5581,5627,5660,5662,5744,5812,5834,5837,5852,5925,5955,6005,6030,6045,6146,6148,6184,6349,6366,6386,6439,6634,6706,6718,6773,6785,6831,6947,6980,7003,7036,7188,7250,7281,7384,7391,7398,7435,7476,7478,7513,7561,7572,7598,7603,7610,7614,7674,7676,7733,7758,7777,7828,7839,7845,7950,7994,8033,8076,8233,8256,8269,8279,8306,8373,8377,8449,8467,8471,8541,8550,8679,8753,8775,8855,10540,10548,10619,10816,10826,10828,10851,10880,10945,11082,11135,11215,11223,11254,11255,11284,11315,11328,11407,11410,11439,11448,11483,11485,11497,11575,11584,11613,11616,11634,11666,11716,11760,11824,11862,11956,12067,12073,12086,12087,12097,12108,12144,12148,12161,12205,12250,12293,12389,12522,12560,12578,12617,12632,12687,12822,12860,12872,12927,12938,12940,12942,12957,12965,13067,13086,13098,13142,13271,13444,13455,13487,13492,13518,13522,13558,13561,13585,13600,13627]'
+```
+
+---
+
+## 6. EVO1
+
+### 6.1 Stage 1（冻结 InternVL3，只训 action head）
+
+```bash
+python -m lerobot.scripts.lerobot_train \
+  --dataset.repo_id=lerobot/libero_plus --dataset.root=./data/libero_plus --dataset.episodes="$episode_ids" \
+  --policy.type=evo1 --policy.training_stage=stage1 \
+  --policy.vlm_model_name=OpenGVLab/InternVL3-1B-hf --policy.device=cuda \
+  --policy.chunk_size=50 --policy.n_action_steps=50 --policy.max_state_dim=24 --policy.max_action_dim=24 \
+  --policy.optimizer_lr=1e-5 --policy.push_to_hub=false \
+  --batch_size=4 --steps=5000 --output_dir=./outputs/alphabet_soup_evo1_stage1
+```
+
+### 6.2 Stage 2
+
+```bash
+python -m lerobot.scripts.lerobot_train \
+  --dataset.repo_id=lerobot/libero_plus --dataset.root=./data/libero_plus --dataset.episodes="$episode_ids" \
+  --policy.path=./outputs/alphabet_soup_evo1_stage1/checkpoints/005000/pretrained_model \
+  --policy.training_stage=stage2 \
+  --policy.vlm_model_name=OpenGVLab/InternVL3-1B-hf --policy.device=cuda \
+  --policy.chunk_size=50 --policy.n_action_steps=50 --policy.max_state_dim=24 --policy.max_action_dim=24 \
+  --policy.optimizer_lr=1e-5 --policy.push_to_hub=false \
+  --batch_size=4 --steps=80000 --output_dir=./outputs/alphabet_soup_evo1_stage2
+```
+
+### 6.3 下载 InternVL3
+
+```bash
+hf download OpenGVLab/InternVL3-1B-hf --revision 014c0583a0d4bedf29fbe2dbff4f865eb998e171 --local-dir ./models/InternVL3-1B-hf
+```
+
+### 6.4 LIBERO 仿真评估（EVO1）
+
+```bash
+python -m lerobot.scripts.lerobot_eval \
+  --policy.path=./models/evo1_libero \
+  --policy.vlm_model_name=./models/InternVL3-1B-hf --policy.device=cuda \
+  --policy.use_amp=true --policy.vlm_dtype=bfloat16 --policy.use_flash_attn=false --policy.enable_gradient_checkpointing=false \
+  --policy.n_action_steps=14 --policy.num_inference_timesteps=32 \
+  --policy.postprocess_action_dim=7 --policy.binarize_gripper=true \
+  --policy.gripper_threshold=0.0 --policy.gripper_below_threshold_value=-1.0 --policy.gripper_above_threshold_value=1.0 \
+  --env.type=libero --env.robot=Panda --env.task=libero_object --env.task_ids='[3]' \
+  --env.camera_name=agentview_image,robot0_eye_in_hand_image \
+  --env.camera_name_mapping='{agentview_image: image, robot0_eye_in_hand_image: image2}' \
+  --env.control_mode=relative --env.observation_width=448 --env.observation_height=448 --env.episode_length=280 \
+  --eval.batch_size=1 --eval.n_episodes=10 --eval.use_async_envs=false
+```
+
+### 6.5 GLFW 实时部署（EVO1）
+
+```bash
+python -m lerobot.scripts.lerobot_deploy_libero \
+  --checkpoint ./models/evo1_libero \
+  --vla-name evo1 \
+  --vlm-model-name ./models/InternVL3-1B-hf --device cuda \
+  --n-action-steps 14 --observation-width 448 --observation-height 448 \
+  --postprocess-action-dim 7 --gripper-threshold 0.0 \
+  --gripper-below-threshold-value -1.0 --gripper-above-threshold-value 1.0 \
+  --suite libero_object --task-id 0 --robot Panda \
+  --task-text "pick up the milk and place it in the basket"
+```
+
+EVO1 action：7D ｜ gripper `threshold=0.0`，open/close = -1/+1（部署脚本已内置官方默认）。
+
+---
+
+## 7. SmolVLA
+
+### 7.1 训练（单阶段，VLM=SmolVLM2-500M-Video-Instruct，State/Action pad=32）
+
+```bash
+python -m lerobot.scripts.lerobot_train \
+  --dataset.repo_id=semi_taks_t1_real --dataset.root=./taks_data/semi_taks_t1_real \
+  --policy.type=smolvla --policy.vlm_model_name=./models/SmolVLM2-500M-Instruct \
+  --policy.load_vlm_weights=true --policy.device=cuda \
+  --policy.chunk_size=50 --policy.n_action_steps=50 --policy.push_to_hub=false \
+  --batch_size=4 --steps=10000 --output_dir=./outputs/pick_up_the_orange_red_object_and_place_it_in_the_black_box_smolvla
+```
+
+### 7.2 解冻视觉编码器（专用任务推荐）
+
+```bash
+python -m lerobot.scripts.lerobot_train \
+  --dataset.repo_id=semi_taks_t1_real --dataset.root=./taks_data/semi_taks_t1_real \
+  --policy.type=smolvla --policy.vlm_model_name=./models/SmolVLM2-500M-Instruct \
+  --policy.load_vlm_weights=true \
+  --policy.freeze_vision_encoder=false --policy.train_expert_only=false \
+  --policy.device=cuda --policy.chunk_size=50 --policy.n_action_steps=50 --policy.push_to_hub=false \
+  --batch_size=4 --steps=10000 --output_dir=./outputs/pick_up_the_orange_red_object_and_place_it_in_the_black_box_smolvla_unfrozen
+```
+
+已有数据统一补充或修改任务描述：
+
+```bash
+python -m lerobot.scripts.lerobot_edit_dataset \
+  --repo_id=semi_taks_t1_real \
+  --root=./taks_data/semi_taks_t1_real \
+  --operation.type=modify_tasks \
+  --operation.new_task="pick up the orange-red object and place it in the black box"
+```
+
+### 7.3 LIBERO 仿真评估（自训 SmolVLA）
+
+```bash
+python -m lerobot.scripts.lerobot_eval \
+  --policy.path=./outputs/pick_up_the_orange_red_object_and_place_it_in_the_black_box_smolvla/checkpoints/last/pretrained_model \
+  --policy.vlm_model_name=./models/SmolVLM2-500M-Instruct --policy.device=cuda \
+  --policy.n_action_steps=50 \
+  --env.type=libero --env.robot=Panda --env.task=libero_object --env.task_ids='[0]' \
+  --env.camera_name=agentview_image,robot0_eye_in_hand_image \
+  --env.observation_width=512 --env.observation_height=512 \
+  --eval.batch_size=1 --eval.n_episodes=10
+```
+
+### 7.4 LIBERO 仿真评估（官方下载 SmolVLA）
+
+```bash
+python -m lerobot.scripts.lerobot_eval \
+  --policy.path=./models/smolvla_libero \
+  --policy.vlm_model_name=./models/SmolVLM2-500M-Instruct --policy.device=cuda \
+  --policy.n_action_steps=1 \
+  --env.type=libero --env.robot=Panda --env.task=libero_object --env.task_ids='[0]' \
+  --env.camera_name=agentview_image,robot0_eye_in_hand_image \
+  --env.camera_name_mapping='{agentview_image: image, robot0_eye_in_hand_image: image2}' \
+  --env.control_mode=relative --env.observation_width=256 --env.observation_height=256 --env.episode_length=280 \
+  --eval.batch_size=1 --eval.n_episodes=10 --eval.use_async_envs=false
+```
+
+### 7.5 GLFW 实时部署（官方下载 SmolVLA）
+
+```bash
+python -m lerobot.scripts.lerobot_deploy_libero \
+  --checkpoint ./models/smolvla_libero \
+  --vlm-model-name ./models/SmolVLM2-500M-Instruct \
+  --vla-name smolvla --device cuda \
+  --n-action-steps 1 --observation-width 256 --observation-height 256 \
+  --suite libero_object --task-id 0 --robot Panda \
+  --task-text "pick up the alphabet soup and place it in the basket"
+```
+
+---
+
+## 8. 真机部署一致性要求
+
+SemiTaksT1 真机输入必须与训练一致：双相机（agentview/front + wrist）｜ 8D state ｜ 7D action。
+
+| | EVO1 | SmolVLA |
+|---|---|---|
+| 分辨率 | 448×448 | 256×256 |
+| action | 7D | 7D |
+| action chunk | 14（部署覆盖） | 1（checkpoint 原生） |
+| gripper | 二值化 (threshold=0.0, ±1) | 不做二值化 |
+
+> `lerobot/libero_plus` 官方数据是 Panda 数据，真机阶段优先用 SemiTaksT1 自采数据训练的 checkpoint。
+
+---
+
+## 9. 后训练（Policy-agnostic）
+
+主线：`BC → HIL/DAgger → SARM → RA-BC → (可选 Online RL)`
+
+### 9.1 BC / Fine-tune
+
+#### 9.1.1 SmolVLA Fine-tune
+
+用新采集的 SemiTaksT1 数据继续训练已有 SmolVLA checkpoint：
+
+```bash
+python -m lerobot.scripts.lerobot_train \
+  --dataset.repo_id=local/libero_hdf5 --dataset.root=./demonstration_data/lerobot_v3_alphabet_soup_smolvla \
+  --policy.type=smolvla --policy.vlm_model_name=./models/SmolVLM2-500M-Instruct \
+  --policy.load_vlm_weights=true \
+  --policy.path=./outputs/pick_up_the_orange_red_object_and_place_it_in_the_black_box_smolvla/checkpoints/last/pretrained_model \
+  --policy.freeze_vision_encoder=false --policy.train_expert_only=false \
+  --batch_size=4 --steps=10000 --output_dir=./outputs/pick_up_the_orange_red_object_and_place_it_in_the_black_box_smolvla_finetune
+```
+
+#### 9.1.2 EVO1 Fine-tune
+
+用新采集的 SemiTaksT1 数据继续训练已有 EVO1 checkpoint（Stage 2 续训）：
+
+```bash
+python -m lerobot.scripts.lerobot_train \
+  --dataset.repo_id=local/libero_hdf5 --dataset.root=./demonstration_data/lerobot_v3_alphabet_soup_evo1 \
+  --policy.type=evo1 --policy.training_stage=stage2 \
+  --policy.path=./models/evo1_libero \
+  --policy.vlm_model_name=OpenGVLab/InternVL3-1B-hf --policy.device=cuda \
+  --policy.chunk_size=50 --policy.n_action_steps=50 --policy.max_state_dim=24 --policy.max_action_dim=24 \
+  --policy.optimizer_lr=1e-5 --policy.push_to_hub=false \
+  --batch_size=4 --steps=20000 --output_dir=./outputs/alphabet_soup_evo1_finetune
+```
+
+用途：新增成功数据 / 失败恢复数据 / 真机域适配。
+
+### 9.2 HIL / DAgger
+
+```
+Policy 自主执行 → 即将失败 → 人工接管 → Recovery/Correction → 继续 Policy → 保存 → 重新 Fine-tune
+```
+
+迭代 `v1 → rollout+HIL → v2 → rollout+HIL → v3`。重点采集当前 policy 的失败/犹豫/偏移/恢复/纠错，而非大量普通示教。
+
+### 9.3 RA-BC（Reward-Aligned Behavior Cloning）
+
+#### 9.3.1 SARM（需训练）
+
+```bash
+pip install -e ".[sarm]"
+
+lerobot-train \
+  --dataset.repo_id=local/libero_hdf5 --dataset.root=./demonstration_data/lerobot_v3_alphabet_soup_smolvla \
+  --reward_model.type=sarm --reward_model.annotation_mode=single_stage --reward_model.image_key=observation.images.image \
+  --output_dir=./outputs/alphabet_soup_sarm --batch_size=32 --steps=5000
+```
+
+#### 9.3.2 Robometer（预训练即用，~8GB 显存，推荐）
+
+4B Qwen3-VL backbone，`lerobot/Robometer-4B` 直接用，输出 progress ∈ [0,1] 或 success ∈ {0,1}。
+
+```bash
+hf download lerobot/Robometer-4B
+
+python -m lerobot.rewards.robometer.compute_rabc_weights \
+  --dataset-repo-id local/libero_plus --dataset-root ./data/libero_plus \
+  --reward-model-path lerobot/Robometer-4B \
+  --image-key observation.images.front --device cuda
+```
+
+#### 9.3.3 TOPReward（零样本，~16GB 显存）
+
+无自身可训练参数，用 `Qwen/Qwen3-VL-8B-Instruct` 算 `log P("True" | video + instruction)`。第一次运行自动下载 VLM 权重（~16GB）。输出是 log-prob 非 progress，需调 `success_threshold`。当前 LeRobot 版本只支持 Qwen3-VL client。
+
+```bash
+hf download Qwen/Qwen3-VL-8B-Instruct
+
+python -m lerobot.rewards.topreward.compute_rabc_weights \
+  --dataset-repo-id local/libero_plus --dataset-root ./data/libero_plus \
+  --num-samples 15 --device cuda
+```
+
+两者都生成 `*_progress.parquet`（schema 与 SARM 兼容），后续 RA-BC 命令不变（9.3.6 节）。
+
+#### 9.3.4 Reward Classifier（不适用于 RA-BC）
+
+二分类 success/fail，只输出 0/1，无 dense progress。用途是 HIL-SERL 在线 RL 的成功检测器，**不能**用于 RA-BC 加权。需人工标注成功/失败帧 + 训练（`--reward_model.type=reward_classifier`），无 alphabet soup 现成权重。
+
+#### 9.3.5 计算 RA-BC 权重
+
+```bash
+python -m lerobot.rewards.sarm.compute_rabc_weights \
+  --dataset-repo-id local/libero_hdf5 \
+  --reward-model-path ./outputs/alphabet_soup_sarm/checkpoints/last/pretrained_model \
+  --head-mode sparse --num-visualizations 5 --device cuda
+```
+
+生成 `sarm_progress.parquet`（列：`index, episode_index, frame_index, progress_sparse, progress_dense`）。
+
+#### 9.3.6 RA-BC 重训
+
+**SmolVLA RA-BC**（官方支持 π0/π0.5/SmolVLA）
+
+```bash
+lerobot-train \
+  --dataset.repo_id=local/libero_hdf5 --dataset.root=./demonstration_data/lerobot_v3_alphabet_soup_smolvla \
+  --policy.type=smolvla --policy.vlm_model_name=./models/SmolVLM2-500M-Instruct \
+  --policy.load_vlm_weights=true \
+  --policy.path=./outputs/pick_up_the_orange_red_object_and_place_it_in_the_black_box_smolvla_finetune/checkpoints/last/pretrained_model \
+  --sample_weighting.type=rabc --sample_weighting.head_mode=sparse --sample_weighting.kappa=0.01 \
+  --output_dir=./outputs/pick_up_the_orange_red_object_and_place_it_in_the_black_box_smolvla_rabc --batch_size=4 --steps=30000
+```
+
+**EVO1 RA-BC**（如官方后续支持，命令骨架）
+
+```bash
+lerobot-train \
+  --dataset.repo_id=local/libero_hdf5 --dataset.root=./demonstration_data/lerobot_v3_alphabet_soup_evo1 \
+  --policy.type=evo1 --policy.training_stage=stage2 \
+  --policy.path=./outputs/alphabet_soup_evo1_finetune/checkpoints/last/pretrained_model \
+  --policy.vlm_model_name=OpenGVLab/InternVL3-1B-hf --policy.device=cuda \
+  --policy.chunk_size=50 --policy.n_action_steps=50 --policy.max_state_dim=24 --policy.max_action_dim=24 \
+  --sample_weighting.type=rabc --sample_weighting.head_mode=sparse --sample_weighting.kappa=0.01 \
+  --batch_size=4 --steps=30000 --output_dir=./outputs/alphabet_soup_evo1_rabc
+```
+
+权重逻辑：有明显进展→高 ｜ 无进展→低 ｜ 倒退→≈0。监控 wandb `sample_weight_mean_weight`（健康 0.3–0.8，≈1.0 说明 kappa 太低退化为普通 BC）。
+
+---
+
+## 10. Online RL（当前不支持 VLA 直接做，需外接 RLinf）
+
+LeRobot HIL-SERL 当前是 `GaussianActor + SAC`，**不能** `--policy.type=smolvla --algorithm=sac`。
+真 VLA 在线 RL 需外接：`LeRobot(数据/BC/HIL/SARM/RA-BC) → EVO1/SmolVLA → RLinf/RLPD/SAC → LIBERO-plus/SemiTaksT1`。
+
+### 10.1 RLinf 是什么
+
+分布式 RL 训练框架（Ray + Hydra），给 VLA / 具身机器人 / LLM Agent 做真 RL 后训练。算法：PPO / GRPO / SAC / CrossQ / TD3 / IQL / DSRL / OPD / RLT。模型：OpenVLA / OpenPI(π0/π0.5) / GR00T / EVO1 / SmolVLA 等。环境：LIBERO / ManiSkill / IsaacLab / CALVIN / 真机 Franka 等。
+
+### 10.2 更新什么权重
+
+拿 LeRobot 训好的 VLA checkpoint → 加 value head（MLP）→ 用 RL 信号更新：
+
+| 模式 | 训练 | 冻结 |
+|---|---|---|
+| 默认 PPO/GRPO（`train_expert_only=True`） | action expert + value head + 投影层 | VLM 主体 |
+| 全量 RL（`train_expert_only=False`） | VLM + expert + value head 全部 | 无 |
+| DSRL（扩散策略+SAC） | 只训轻量 SAC agent（latent noise 空间） | VLM + expert + 投影层全冻结 |
+
+### 10.3 训练流程（PPO 为例）
+
+```
+每个 epoch:
+  1. 同步权重 Actor → Rollout
+  2. Rollout: policy 在环境跑, 收集 (obs, action, reward, logprob, value, done)
+  3. 算优势 GAE (γ=0.99, λ=0.95)
+  4. Actor 更新: PPO clipped loss, update_epoch=4
+  5. 回到 1
+```
+
+### 10.4 架构（Ray 分布式四组件）
+
+```
+Actor(训练,FSDP/Megatron) → Rollout(推理,HF/SGLang/vLLM) → Env(交互,LIBERO/真机) → Reward(打分,可选)
+         ↑                    ↑
+    权重每 epoch 同步: Actor → Rollout
+```
+
+- **Actor**：持有 policy 权重，算 loss，梯度更新
+- **Rollout**：用 policy 推理出 action，收集轨迹
+- **Env**：执行 action，返回 obs+reward+done
+- **Reward**：算 reward（仿真自带时可省略）
+
+---
+
+## 11. 最终流程
+
+**EVO1**：SemiTaksT1 Demo → HDF5 → LeRobot v3·448 → Stage1 → Stage2 → LIBERO Eval → 真机
+**SmolVLA**：SemiTaksT1 Demo → HDF5 → LeRobot v3·512 → SmolVLA → Vision Encoder Fine-tune → LIBERO Eval → 真机
+**Post-training**：BC → HIL/DAgger → SARM → RA-BC → RLinf/RLPD/SAC
+
+注：改n_action_steps会顿挫推理，但是性能消耗小
