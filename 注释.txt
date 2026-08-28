@@ -282,6 +282,18 @@ python -m lerobot.scripts.lerobot_deploy_libero \
   --task-text "pick up the alphabet soup and place it in the basket"
 ```
 
+### 7.6 GLFW 实时部署（自训 SmolVLA，orange-red object → black box）
+
+```bash
+python -m lerobot.scripts.lerobot_deploy_libero \
+  --checkpoint ./outputs/pick_up_the_orange_red_object_and_place_it_in_the_black_box_smolvla/checkpoints/last/pretrained_model \
+  --vlm-model-name ./models/SmolVLM2-500M-Instruct \
+  --vla-name smolvla --device cuda \
+  --n-action-steps 1 --observation-width 256 --observation-height 256 \
+  --suite libero_object --task-id 0 --robot Panda \
+  --task-text "pick up the orange-red object and place it in the black box"
+```
+
 ---
 
 ## 8. 真机部署一致性要求

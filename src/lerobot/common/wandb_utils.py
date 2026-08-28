@@ -207,3 +207,41 @@ class WandBLogger:
 
         wandb_video = self._wandb.Video(video_path, fps=self.env_fps, format="mp4")
         self._wandb.log({f"{mode}/video": wandb_video}, step=step)
+
+
+class TensorBoardLogger:
+    """A helper class to log metrics to TensorBoard, mirroring WandBLogger's interface."""
+
+    def __init__(self, cfg: TrainPipelineConfig):
+        from torch.utils.tensorboard import SummaryWriter
+
+        self.log_dir = cfg.output_dir
+        self.env_fps = cfg.env.fps if cfg.env else None
+        self._tb_dir = self.log_dir / "tensorboard"
+        self._tb_dir.mkdir(parents=True, exist_ok=True)
+        self._writer = SummaryWriter(log_dir=str(self._tb_dir))
+        logging.info(colored("Logs will be synced with TensorBoard.", "blue", attrs=["bold"]))
+        logging.info(
+            f"Track this run --> {colored(f'tensorboard --logdir {self._tb_dir}', 'yellow', attrs=['bold'])}"
+        )
+
+    def log_policy(self, checkpoint_dir: Path):
+        pass
+
+    def log_dict(
+        self, d: dict, step: int | None = None, mode: str = "train", custom_step_key: str | None = None
+    ):
+        if mode not in {"train", "eval"}:
+            raise ValueError(mode)
+        if step is None:
+            raise ValueError("step must be provided for TensorBoard logging.")
+        for k, v in d.items():
+            if not isinstance(v, (int | float)):
+                continue
+            self._writer.add_scalar(f"{mode}/{k}", v, step)
+
+    def log_video(self, video_path: str, step: int, mode: str = "train"):
+        pass
+
+    def close(self):
+        self._writer.close()
